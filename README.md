@@ -80,10 +80,70 @@ TWITTER_LEARNING_MAX_MEMORIES=5
 TWITTER_THREAD_CONTEXT_MAX_DEPTH=8
 ```
 
+### What’s New In This Fork
+
+This fork adds reliability and memory capabilities that are not in stock `@elizaos/plugin-twitter`:
+
+1. **Deep thread-aware replies**
+   - Mentions now hydrate parent/root tweets and pass thread context to the model.
+   - This helps when the agent is tagged several replies deep.
+   - Tune with:
+     - `TWITTER_THREAD_CONTEXT_MAX_DEPTH=8`
+
+2. **Trusted correction learning (cross-thread user memory)**
+   - Correction-like messages from trusted users can be persisted as long-term facts.
+   - On later replies to that same user, recent trusted corrections are injected as internal context.
+   - Configure with:
+     - `TWITTER_ENABLE_LEARNING=true`
+     - `TWITTER_LEARNING_TRUSTED_USERS=alice,bob` (or `*`)
+     - `TWITTER_LEARNING_MAX_MEMORIES=5`
+
+3. **First-run context bootstrapping**
+   - The plugin now ensures world/room/entity context before memory writes and state composition.
+   - This reduces first-run failures such as `"No room found"` during mention handling.
+
+4. **Playground-compatible API mode**
+   - Added `bearer` auth mode plus API host override so you can point the plugin at compatible APIs (for example `xdevplatform/playground`).
+   - Configure with:
+     - `TWITTER_AUTH_MODE=bearer`
+     - `TWITTER_BEARER_TOKEN=test_token`
+     - `TWITTER_API_BASE_URL=http://localhost:8080`
+
+### New Feature Recipes
+
+#### 1) Turn on trusted correction learning
+
+```bash
+TWITTER_ENABLE_LEARNING=true
+TWITTER_LEARNING_TRUSTED_USERS=alice,bob
+TWITTER_LEARNING_MAX_MEMORIES=5
+```
+
+#### 2) Increase/decrease deep thread context
+
+```bash
+TWITTER_THREAD_CONTEXT_MAX_DEPTH=12
+```
+
+#### 3) Run against xdevplatform/playground
+
+```bash
+TWITTER_AUTH_MODE=bearer
+TWITTER_BEARER_TOKEN=test_token
+TWITTER_API_BASE_URL=http://localhost:8080
+TWITTER_DRY_RUN=true
+TWITTER_ENABLE_REPLIES=true
+```
+
+When `TWITTER_API_BASE_URL` is set, requests targeting `*.x.com` / `*.twitter.com` are rewritten to your configured host.
+
 ## Prerequisites
 
 - Twitter Developer Account with API v2 access
-- Either Twitter OAuth 1.0a credentials (legacy env vars) or OAuth 2.0 Client ID (PKCE)
+- One of:
+  - Twitter OAuth 1.0a credentials (legacy env vars), or
+  - OAuth 2.0 Client ID (PKCE), or
+  - Static bearer token + optional API base override for compatible simulators
 - Node.js and bun installed
 
 ## 🚀 Quick Start
@@ -279,6 +339,12 @@ TWITTER_DRY_RUN=false              # Set to true for testing without posting
 TWITTER_TARGET_USERS=              # Comma-separated usernames to target (use "*" for all)
 TWITTER_RETRY_LIMIT=5              # Maximum retry attempts for failed operations
 
+# Learning + Thread Context
+TWITTER_ENABLE_LEARNING=true       # Enable trusted-user correction learning
+TWITTER_LEARNING_TRUSTED_USERS=    # Comma-separated usernames, "*" = everyone, empty = disabled
+TWITTER_LEARNING_MAX_MEMORIES=5    # Max trusted correction memories injected into reply context
+TWITTER_THREAD_CONTEXT_MAX_DEPTH=8 # Max ancestor depth when reconstructing thread context
+
 # Feature Toggles
 TWITTER_ENABLE_POST=false          # Enable autonomous tweet posting
 TWITTER_ENABLE_REPLIES=true        # Enable mention and reply handling
@@ -414,6 +480,26 @@ TWITTER_ENABLE_POST=true
 TWITTER_POST_IMMEDIATELY=true
 ```
 
+### Want Learning + Deep Context Replies?
+
+```bash
+TWITTER_ENABLE_REPLIES=true
+TWITTER_ENABLE_LEARNING=true
+TWITTER_LEARNING_TRUSTED_USERS=alice,bob
+TWITTER_LEARNING_MAX_MEMORIES=5
+TWITTER_THREAD_CONTEXT_MAX_DEPTH=8
+```
+
+### Want To Test Against xdevplatform/playground?
+
+```bash
+TWITTER_AUTH_MODE=bearer
+TWITTER_BEARER_TOKEN=test_token
+TWITTER_API_BASE_URL=http://localhost:8080
+TWITTER_DRY_RUN=true
+TWITTER_ENABLE_REPLIES=true
+```
+
 ## 🚨 Troubleshooting
 
 ### 403 Errors When Engaging with Tweets
@@ -493,6 +579,16 @@ This usually means your credentials don’t match your selected auth mode.
 - Rate limiting (check Twitter Developer Portal)
 - Invalid credentials
 - Account restrictions
+
+### "No room found" On First Run
+
+This fork now auto-creates Twitter world/room/entity context before memory writes.
+
+If you still see room-related errors:
+
+1. Confirm your runtime exposes `ensureWorldExists`, `ensureRoomExists`, and `ensureConnection`
+2. Make sure `conversationId` and tweet IDs are not missing in incoming payloads
+3. Enable debug logs and inspect the tweet/context IDs being generated
 
 ### "Invalid or expired token"
 
