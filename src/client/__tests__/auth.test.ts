@@ -51,6 +51,60 @@ describe("TwitterAuth", () => {
         expect(client).toBe(mockTwitterApi);
       });
     });
+
+    it("should rewrite request hosts when API base URL override is configured", async () => {
+      const bearerAuth = new TwitterAuth({
+        mode: "bearer",
+        getAccessToken: async () => "test-bearer-token",
+        getApiBaseUrl: () => "http://localhost:8080",
+      } as any);
+
+      await bearerAuth.getV2Client();
+
+      const call = (TwitterApi as any).mock.calls[0];
+      expect(call[0]).toBe("test-bearer-token");
+      expect(call[1]?.plugins?.length).toBe(1);
+
+      const plugin = call[1].plugins[0];
+
+      const requestConfigArgs: any = {
+        client: {},
+        url: new URL("https://api.x.com/2/tweets"),
+        params: {
+          url: "https://api.x.com/2/tweets",
+          method: "GET",
+        },
+      };
+      plugin.onBeforeRequestConfig?.(requestConfigArgs);
+      expect(requestConfigArgs.params.url).toBe(
+        "http://localhost:8080/2/tweets",
+      );
+
+      const streamRequestConfigArgs: any = {
+        client: {},
+        url: new URL("https://stream.x.com/1.1/statuses/filter.json"),
+        params: {
+          url: "https://stream.x.com/1.1/statuses/filter.json",
+          method: "GET",
+        },
+      };
+      plugin.onBeforeStreamRequestConfig?.(streamRequestConfigArgs);
+      expect(streamRequestConfigArgs.params.url).toBe(
+        "http://localhost:8080/1.1/statuses/filter.json",
+      );
+    });
+
+    it("should throw a clear error for invalid API base URL override", async () => {
+      const bearerAuth = new TwitterAuth({
+        mode: "bearer",
+        getAccessToken: async () => "test-bearer-token",
+        getApiBaseUrl: () => "localhost:8080",
+      } as any);
+
+      await expect(bearerAuth.getV2Client()).rejects.toThrow(
+        "Invalid TWITTER_API_BASE_URL",
+      );
+    });
   });
 
   describe("isLoggedIn", () => {

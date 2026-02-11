@@ -265,12 +265,23 @@ export class ClientBase {
 
     // Use a stable identifier for client reuse per auth mode.
     const mode = getTwitterAuthMode(runtime, state);
-    const reuseKey =
+    const apiBaseUrl =
+      state?.TWITTER_API_BASE_URL ??
+      getSetting(runtime, "TWITTER_API_BASE_URL");
+    const modeKeyValue =
       mode === "env"
-        ? state?.TWITTER_API_KEY ?? getSetting(runtime, "TWITTER_API_KEY")
+        ? (state?.TWITTER_API_KEY ?? getSetting(runtime, "TWITTER_API_KEY"))
         : mode === "oauth"
-          ? state?.TWITTER_CLIENT_ID ?? getSetting(runtime, "TWITTER_CLIENT_ID")
-          : state?.TWITTER_BROKER_URL ?? getSetting(runtime, "TWITTER_BROKER_URL");
+          ? (state?.TWITTER_CLIENT_ID ??
+            getSetting(runtime, "TWITTER_CLIENT_ID"))
+          : mode === "bearer"
+            ? (state?.TWITTER_BEARER_TOKEN ??
+              getSetting(runtime, "TWITTER_BEARER_TOKEN"))
+            : (state?.TWITTER_BROKER_URL ??
+              getSetting(runtime, "TWITTER_BROKER_URL"));
+    const reuseKey = modeKeyValue
+      ? `${mode}:${modeKeyValue}:${apiBaseUrl ?? ""}`
+      : undefined;
 
     if (reuseKey && ClientBase._twitterClients[reuseKey]) {
       this.twitterClient = ClientBase._twitterClients[reuseKey];

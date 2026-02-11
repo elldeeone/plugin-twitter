@@ -7,8 +7,8 @@ import type { TwitterAuthProvider } from "./types";
 import { createCodeChallenge, createCodeVerifier, createState } from "./pkce";
 import { promptForRedirectedUrl, waitForLoopbackCallback } from "./interactive";
 
-const AUTHORIZE_URL = "https://twitter.com/i/oauth2/authorize";
-const TOKEN_URL = "https://api.twitter.com/2/oauth2/token";
+const DEFAULT_AUTHORIZE_URL = "https://twitter.com/i/oauth2/authorize";
+const DEFAULT_TOKEN_URL = "https://api.twitter.com/2/oauth2/token";
 
 const DEFAULT_SCOPES = [
   "tweet.read",
@@ -45,18 +45,37 @@ export class OAuth2PKCEAuthProvider implements TwitterAuthProvider {
 
   private get clientId(): string {
     const v = getSetting(this.runtime, "TWITTER_CLIENT_ID");
-    if (!v) throw new Error("TWITTER_CLIENT_ID is required for TWITTER_AUTH_MODE=oauth");
+    if (!v)
+      throw new Error(
+        "TWITTER_CLIENT_ID is required for TWITTER_AUTH_MODE=oauth",
+      );
     return v;
   }
 
   private get redirectUri(): string {
     const v = getSetting(this.runtime, "TWITTER_REDIRECT_URI");
-    if (!v) throw new Error("TWITTER_REDIRECT_URI is required for TWITTER_AUTH_MODE=oauth");
+    if (!v)
+      throw new Error(
+        "TWITTER_REDIRECT_URI is required for TWITTER_AUTH_MODE=oauth",
+      );
     return v;
   }
 
   private get scopes(): string {
     return getSetting(this.runtime, "TWITTER_SCOPES") || DEFAULT_SCOPES;
+  }
+
+  private get authorizeUrl(): string {
+    return (
+      getSetting(this.runtime, "TWITTER_OAUTH2_AUTHORIZE_URL") ||
+      DEFAULT_AUTHORIZE_URL
+    );
+  }
+
+  private get tokenUrl(): string {
+    return (
+      getSetting(this.runtime, "TWITTER_OAUTH2_TOKEN_URL") || DEFAULT_TOKEN_URL
+    );
   }
 
   private async loadTokens(): Promise<StoredOAuth2Tokens | null> {
@@ -74,7 +93,7 @@ export class OAuth2PKCEAuthProvider implements TwitterAuthProvider {
     state: string;
     codeChallenge: string;
   }): string {
-    const url = new URL(AUTHORIZE_URL);
+    const url = new URL(this.authorizeUrl);
     url.searchParams.set("response_type", "code");
     url.searchParams.set("client_id", this.clientId);
     url.searchParams.set("redirect_uri", this.redirectUri);
@@ -97,7 +116,7 @@ export class OAuth2PKCEAuthProvider implements TwitterAuthProvider {
       code_verifier: params.codeVerifier,
     });
 
-    const res = await this.fetchImpl(TOKEN_URL, {
+    const res = await this.fetchImpl(this.tokenUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -126,18 +145,21 @@ export class OAuth2PKCEAuthProvider implements TwitterAuthProvider {
       refresh_token: refresh,
       expires_at: nowMs() + expiresIn * 1000,
       scope: typeof json.scope === "string" ? json.scope : undefined,
-      token_type: typeof json.token_type === "string" ? json.token_type : undefined,
+      token_type:
+        typeof json.token_type === "string" ? json.token_type : undefined,
     };
   }
 
-  private async refreshAccessToken(refreshToken: string): Promise<StoredOAuth2Tokens> {
+  private async refreshAccessToken(
+    refreshToken: string,
+  ): Promise<StoredOAuth2Tokens> {
     const body = formEncode({
       grant_type: "refresh_token",
       client_id: this.clientId,
       refresh_token: refreshToken,
     });
 
-    const res = await this.fetchImpl(TOKEN_URL, {
+    const res = await this.fetchImpl(this.tokenUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -166,7 +188,8 @@ export class OAuth2PKCEAuthProvider implements TwitterAuthProvider {
       refresh_token: refresh,
       expires_at: nowMs() + expiresIn * 1000,
       scope: typeof json.scope === "string" ? json.scope : undefined,
-      token_type: typeof json.token_type === "string" ? json.token_type : undefined,
+      token_type:
+        typeof json.token_type === "string" ? json.token_type : undefined,
     };
   }
 
@@ -239,7 +262,10 @@ export class OAuth2PKCEAuthProvider implements TwitterAuthProvider {
     await this.saveTokens(refreshed);
     return refreshed.access_token;
   }
+
+  getApiBaseUrl(): string | undefined {
+    return getSetting(this.runtime, "TWITTER_API_BASE_URL") ?? undefined;
+  }
 }
 
 export const OAUTH2_DEFAULT_SCOPES = DEFAULT_SCOPES;
-

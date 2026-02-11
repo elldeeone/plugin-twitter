@@ -29,5 +29,8 @@ export class BrokerAuthProvider implements TwitterAuthProvider {
         "TODO: implement broker contract to fetch short-lived access tokens.",
     );
   }
-}
 
+  getApiBaseUrl(): string | undefined {
+    return getSetting(this.runtime, "TWITTER_API_BASE_URL") ?? undefined;
+  }
+}

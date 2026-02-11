@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "@vitest/coverage-v8": "3.2.4", 
+    "@vitest/coverage-v8": "3.2.4",
     "prettier": "3.6.1",
     "tsup": "8.5.0",
     "typescript": "^5.8.3",
@@ -54,7 +54,7 @@
     "pluginParameters": {
       "TWITTER_AUTH_MODE": {
         "type": "string",
-        "description": "Auth mode: 'env' (legacy keys/tokens), 'oauth' (3-legged OAuth2 PKCE), or 'broker' (stub).",
+        "description": "Auth mode: 'env' (legacy keys/tokens), 'oauth' (3-legged OAuth2 PKCE), 'bearer' (static bearer token), or 'broker' (stub).",
         "required": false,
         "default": "env",
         "sensitive": false
@@ -106,6 +106,33 @@
         "type": "string",
         "description": "Broker URL (required for TWITTER_AUTH_MODE=broker; stub only).",
         "required": false,
+        "sensitive": false
+      },
+      "TWITTER_BEARER_TOKEN": {
+        "type": "string",
+        "description": "Bearer access token (required for TWITTER_AUTH_MODE=bearer).",
+        "required": false,
+        "sensitive": true
+      },
+      "TWITTER_API_BASE_URL": {
+        "type": "string",
+        "description": "Optional override for Twitter API base URL (for compatible servers, e.g. local playground).",
+        "required": false,
+        "default": "",
+        "sensitive": false
+      },
+      "TWITTER_OAUTH2_AUTHORIZE_URL": {
+        "type": "string",
+        "description": "Optional override for OAuth2 authorize URL in oauth mode.",
+        "required": false,
+        "default": "",
+        "sensitive": false
+      },
+      "TWITTER_OAUTH2_TOKEN_URL": {
+        "type": "string",
+        "description": "Optional override for OAuth2 token URL in oauth mode.",
+        "required": false,
+        "default": "",
         "sensitive": false
       },
       "TWITTER_TARGET_USERS": {

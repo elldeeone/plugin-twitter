@@ -1,6 +1,6 @@
 import type { IAgentRuntime } from "@elizaos/core";
 
-export type TwitterAuthMode = "env" | "oauth" | "broker";
+export type TwitterAuthMode = "env" | "oauth" | "broker" | "bearer";
 
 /**
  * Primary abstraction: obtain a valid access token for Twitter/X API calls.
@@ -17,6 +17,12 @@ export interface TwitterAuthProvider {
    * Implementations should refresh/reauth as needed.
    */
   getAccessToken(): Promise<string>;
+
+  /**
+   * Optional API base URL override for Twitter-compatible servers.
+   * Example: http://localhost:8080 (xdevplatform playground)
+   */
+  getApiBaseUrl?(): string | undefined;
 }
 
 export interface OAuth1Credentials {
@@ -38,4 +44,3 @@ export interface TwitterAuthProviderFactoryOptions {
   runtime: IAgentRuntime;
   state?: any;
 }
-

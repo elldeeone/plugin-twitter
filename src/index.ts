@@ -13,13 +13,18 @@ export const TwitterPlugin: Plugin = {
     // Only do validation in init, don't start services
     logger.log("🔧 Initializing Twitter plugin...");
 
-    const mode = (getSetting(runtime, "TWITTER_AUTH_MODE") || "env").toLowerCase();
+    const mode = (
+      getSetting(runtime, "TWITTER_AUTH_MODE") || "env"
+    ).toLowerCase();
 
     if (mode === "env") {
       const apiKey = getSetting(runtime, "TWITTER_API_KEY");
       const apiSecretKey = getSetting(runtime, "TWITTER_API_SECRET_KEY");
       const accessToken = getSetting(runtime, "TWITTER_ACCESS_TOKEN");
-      const accessTokenSecret = getSetting(runtime, "TWITTER_ACCESS_TOKEN_SECRET");
+      const accessTokenSecret = getSetting(
+        runtime,
+        "TWITTER_ACCESS_TOKEN_SECRET",
+      );
 
       if (!apiKey || !apiSecretKey || !accessToken || !accessTokenSecret) {
         const missing = [];
@@ -54,11 +59,20 @@ export const TwitterPlugin: Plugin = {
           "TWITTER_AUTH_MODE=broker requires TWITTER_BROKER_URL (broker auth is not implemented yet).",
         );
       } else {
-        logger.log("ℹ️ Twitter broker mode configured (stub; not functional yet)");
+        logger.log(
+          "ℹ️ Twitter broker mode configured (stub; not functional yet)",
+        );
+      }
+    } else if (mode === "bearer") {
+      const token = getSetting(runtime, "TWITTER_BEARER_TOKEN");
+      if (!token) {
+        logger.warn("TWITTER_AUTH_MODE=bearer requires TWITTER_BEARER_TOKEN.");
+      } else {
+        logger.log("✅ Twitter bearer token configuration found");
       }
     } else {
       logger.warn(
-        `Invalid TWITTER_AUTH_MODE=${mode}. Expected env|oauth|broker.`,
+        `Invalid TWITTER_AUTH_MODE=${mode}. Expected env|oauth|broker|bearer.`,
       );
     }
   },

@@ -9,7 +9,9 @@ import { z } from "zod";
  */
 export const twitterEnvSchema = z.object({
   // Auth mode (backward compatible default)
-  TWITTER_AUTH_MODE: z.enum(["env", "oauth", "broker"]).default("env"),
+  TWITTER_AUTH_MODE: z
+    .enum(["env", "oauth", "broker", "bearer"])
+    .default("env"),
 
   // Required API credentials
   TWITTER_API_KEY: z.string().default(""),
@@ -26,6 +28,10 @@ export const twitterEnvSchema = z.object({
 
   // Broker scaffolding (stub)
   TWITTER_BROKER_URL: z.string().default(""),
+  TWITTER_BEARER_TOKEN: z.string().default(""),
+  TWITTER_API_BASE_URL: z.string().default(""),
+  TWITTER_OAUTH2_AUTHORIZE_URL: z.string().default(""),
+  TWITTER_OAUTH2_TOKEN_URL: z.string().default(""),
 
   // Core configuration
   TWITTER_DRY_RUN: z.string().default("false"),
@@ -189,6 +195,22 @@ export async function validateTwitterConfig(
         (config as any).TWITTER_BROKER_URL ??
         getSetting(runtime, "TWITTER_BROKER_URL") ??
         "",
+      TWITTER_BEARER_TOKEN:
+        (config as any).TWITTER_BEARER_TOKEN ??
+        getSetting(runtime, "TWITTER_BEARER_TOKEN") ??
+        "",
+      TWITTER_API_BASE_URL:
+        (config as any).TWITTER_API_BASE_URL ??
+        getSetting(runtime, "TWITTER_API_BASE_URL") ??
+        "",
+      TWITTER_OAUTH2_AUTHORIZE_URL:
+        (config as any).TWITTER_OAUTH2_AUTHORIZE_URL ??
+        getSetting(runtime, "TWITTER_OAUTH2_AUTHORIZE_URL") ??
+        "",
+      TWITTER_OAUTH2_TOKEN_URL:
+        (config as any).TWITTER_OAUTH2_TOKEN_URL ??
+        getSetting(runtime, "TWITTER_OAUTH2_TOKEN_URL") ??
+        "",
       TWITTER_DRY_RUN: String(
         (
           config.TWITTER_DRY_RUN ??
@@ -339,7 +361,10 @@ export async function validateTwitterConfig(
         );
       }
     } else if (mode === "oauth") {
-      if (!validatedConfig.TWITTER_CLIENT_ID || !validatedConfig.TWITTER_REDIRECT_URI) {
+      if (
+        !validatedConfig.TWITTER_CLIENT_ID ||
+        !validatedConfig.TWITTER_REDIRECT_URI
+      ) {
         throw new Error(
           "Twitter OAuth is selected (TWITTER_AUTH_MODE=oauth). Please set TWITTER_CLIENT_ID and TWITTER_REDIRECT_URI",
         );
@@ -350,9 +375,15 @@ export async function validateTwitterConfig(
           "Twitter broker auth is selected (TWITTER_AUTH_MODE=broker). Please set TWITTER_BROKER_URL",
         );
       }
+    } else if (mode === "bearer") {
+      if (!validatedConfig.TWITTER_BEARER_TOKEN) {
+        throw new Error(
+          "Twitter bearer auth is selected (TWITTER_AUTH_MODE=bearer). Please set TWITTER_BEARER_TOKEN",
+        );
+      }
     } else {
       throw new Error(
-        `Invalid TWITTER_AUTH_MODE=${validatedConfig.TWITTER_AUTH_MODE}. Expected env|oauth|broker.`,
+        `Invalid TWITTER_AUTH_MODE=${validatedConfig.TWITTER_AUTH_MODE}. Expected env|oauth|broker|bearer.`,
       );
     }
 
@@ -422,6 +453,11 @@ function getDefaultConfig(): TwitterConfig {
       getConfig("TWITTER_SCOPES") ||
       "tweet.read tweet.write users.read offline.access",
     TWITTER_BROKER_URL: getConfig("TWITTER_BROKER_URL") || "",
+    TWITTER_BEARER_TOKEN: getConfig("TWITTER_BEARER_TOKEN") || "",
+    TWITTER_API_BASE_URL: getConfig("TWITTER_API_BASE_URL") || "",
+    TWITTER_OAUTH2_AUTHORIZE_URL:
+      getConfig("TWITTER_OAUTH2_AUTHORIZE_URL") || "",
+    TWITTER_OAUTH2_TOKEN_URL: getConfig("TWITTER_OAUTH2_TOKEN_URL") || "",
     TWITTER_DRY_RUN: getConfig("TWITTER_DRY_RUN") || "false",
     TWITTER_TARGET_USERS: getConfig("TWITTER_TARGET_USERS") || "",
     TWITTER_ENABLE_LEARNING: getConfig("TWITTER_ENABLE_LEARNING") || "true",
@@ -439,10 +475,14 @@ function getDefaultConfig(): TwitterConfig {
     TWITTER_POST_INTERVAL_MAX: getConfig("TWITTER_POST_INTERVAL_MAX") || "180",
     TWITTER_ENGAGEMENT_INTERVAL:
       getConfig("TWITTER_ENGAGEMENT_INTERVAL") || "30",
-    TWITTER_ENGAGEMENT_INTERVAL_MIN: getConfig("TWITTER_ENGAGEMENT_INTERVAL_MIN") || "20",
-    TWITTER_ENGAGEMENT_INTERVAL_MAX: getConfig("TWITTER_ENGAGEMENT_INTERVAL_MAX") || "40",
-    TWITTER_DISCOVERY_INTERVAL_MIN: getConfig("TWITTER_DISCOVERY_INTERVAL_MIN") || "15",
-    TWITTER_DISCOVERY_INTERVAL_MAX: getConfig("TWITTER_DISCOVERY_INTERVAL_MAX") || "30",
+    TWITTER_ENGAGEMENT_INTERVAL_MIN:
+      getConfig("TWITTER_ENGAGEMENT_INTERVAL_MIN") || "20",
+    TWITTER_ENGAGEMENT_INTERVAL_MAX:
+      getConfig("TWITTER_ENGAGEMENT_INTERVAL_MAX") || "40",
+    TWITTER_DISCOVERY_INTERVAL_MIN:
+      getConfig("TWITTER_DISCOVERY_INTERVAL_MIN") || "15",
+    TWITTER_DISCOVERY_INTERVAL_MAX:
+      getConfig("TWITTER_DISCOVERY_INTERVAL_MAX") || "30",
     TWITTER_MAX_ENGAGEMENTS_PER_RUN:
       getConfig("TWITTER_MAX_ENGAGEMENTS_PER_RUN") || "5",
     TWITTER_MAX_TWEET_LENGTH: getConfig("TWITTER_MAX_TWEET_LENGTH") || "280",
@@ -489,43 +529,61 @@ export function validateConfig(config: unknown): TwitterConfig {
 /**
  * Get a random interval between min and max values
  * If min/max are not configured, falls back to the fixed interval
- * 
+ *
  * @param runtime - The agent runtime
  * @param type - The type of interval ('post', 'engagement', 'discovery')
  * @returns Random interval in minutes
  */
 export function getRandomInterval(
   runtime: IAgentRuntime,
-  type: 'post' | 'engagement' | 'discovery',
+  type: "post" | "engagement" | "discovery",
 ): number {
   let minInterval: number | undefined;
   let maxInterval: number | undefined;
   let fallbackInterval: number;
 
   switch (type) {
-    case 'post':
-      const postMin = getSetting(runtime, "TWITTER_POST_INTERVAL_MIN") as string;
-      const postMax = getSetting(runtime, "TWITTER_POST_INTERVAL_MAX") as string;
+    case "post":
+      const postMin = getSetting(
+        runtime,
+        "TWITTER_POST_INTERVAL_MIN",
+      ) as string;
+      const postMax = getSetting(
+        runtime,
+        "TWITTER_POST_INTERVAL_MAX",
+      ) as string;
       minInterval = postMin ? safeParseInt(postMin, 0) : undefined;
       maxInterval = postMax ? safeParseInt(postMax, 0) : undefined;
       fallbackInterval = safeParseInt(
         getSetting(runtime, "TWITTER_POST_INTERVAL") as string,
-        120
+        120,
       );
       break;
-    case 'engagement':
-      const engagementMin = getSetting(runtime, "TWITTER_ENGAGEMENT_INTERVAL_MIN") as string;
-      const engagementMax = getSetting(runtime, "TWITTER_ENGAGEMENT_INTERVAL_MAX") as string;
+    case "engagement":
+      const engagementMin = getSetting(
+        runtime,
+        "TWITTER_ENGAGEMENT_INTERVAL_MIN",
+      ) as string;
+      const engagementMax = getSetting(
+        runtime,
+        "TWITTER_ENGAGEMENT_INTERVAL_MAX",
+      ) as string;
       minInterval = engagementMin ? safeParseInt(engagementMin, 0) : undefined;
       maxInterval = engagementMax ? safeParseInt(engagementMax, 0) : undefined;
       fallbackInterval = safeParseInt(
         getSetting(runtime, "TWITTER_ENGAGEMENT_INTERVAL") as string,
-        30
+        30,
       );
       break;
-    case 'discovery':
-      const discoveryMin = getSetting(runtime, "TWITTER_DISCOVERY_INTERVAL_MIN") as string;
-      const discoveryMax = getSetting(runtime, "TWITTER_DISCOVERY_INTERVAL_MAX") as string;
+    case "discovery":
+      const discoveryMin = getSetting(
+        runtime,
+        "TWITTER_DISCOVERY_INTERVAL_MIN",
+      ) as string;
+      const discoveryMax = getSetting(
+        runtime,
+        "TWITTER_DISCOVERY_INTERVAL_MAX",
+      ) as string;
       minInterval = discoveryMin ? safeParseInt(discoveryMin, 0) : undefined;
       maxInterval = discoveryMax ? safeParseInt(discoveryMax, 0) : undefined;
       fallbackInterval = 20; // Default discovery interval
@@ -535,9 +593,16 @@ export function getRandomInterval(
   }
 
   // If MIN/MAX are properly configured, use random value between them
-  if (minInterval !== undefined && maxInterval !== undefined && minInterval < maxInterval) {
-    const randomInterval = Math.random() * (maxInterval - minInterval) + minInterval;
-    logger.debug(`Random ${type} interval: ${randomInterval.toFixed(1)} minutes (between ${minInterval}-${maxInterval})`);
+  if (
+    minInterval !== undefined &&
+    maxInterval !== undefined &&
+    minInterval < maxInterval
+  ) {
+    const randomInterval =
+      Math.random() * (maxInterval - minInterval) + minInterval;
+    logger.debug(
+      `Random ${type} interval: ${randomInterval.toFixed(1)} minutes (between ${minInterval}-${maxInterval})`,
+    );
     return randomInterval;
   }
 

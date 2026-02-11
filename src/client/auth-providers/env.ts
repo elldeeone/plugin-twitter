@@ -21,7 +21,8 @@ export class EnvAuthProvider implements TwitterOAuth1Provider {
 
   async getOAuth1Credentials(): Promise<OAuth1Credentials> {
     const apiKey =
-      this.state?.TWITTER_API_KEY ?? getSetting(this.runtime, "TWITTER_API_KEY");
+      this.state?.TWITTER_API_KEY ??
+      getSetting(this.runtime, "TWITTER_API_KEY");
     const apiSecretKey =
       this.state?.TWITTER_API_SECRET_KEY ??
       getSetting(this.runtime, "TWITTER_API_SECRET_KEY");
@@ -55,5 +56,12 @@ export class EnvAuthProvider implements TwitterOAuth1Provider {
     const creds = await this.getOAuth1Credentials();
     return creds.accessToken;
   }
-}
 
+  getApiBaseUrl(): string | undefined {
+    return (
+      this.state?.TWITTER_API_BASE_URL ??
+      getSetting(this.runtime, "TWITTER_API_BASE_URL") ??
+      undefined
+    );
+  }
+}

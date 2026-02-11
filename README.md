@@ -9,7 +9,6 @@ This package provides Twitter/X integration for the Eliza AI agent using the off
 1. **Get Twitter Developer account** → https://developer.twitter.com
 2. **Create an app** → Enable "Read and write" permissions
 3. Choose your auth mode:
-
    - **Option A (default, legacy): OAuth 1.0a env vars**
      - API Key & Secret (from "Consumer Keys")
      - Access Token & Secret (from "Authentication Tokens")
@@ -18,7 +17,13 @@ This package provides Twitter/X integration for the Eliza AI agent using the off
      - Client ID (from "OAuth 2.0 Client ID")
      - Redirect URI (loopback recommended)
 
+   - **Option C (local playground/testing): static Bearer token**
+     - `TWITTER_AUTH_MODE=bearer`
+     - `TWITTER_BEARER_TOKEN=<token>`
+     - Optional `TWITTER_API_BASE_URL` (for compatible servers like local playground)
+
 4. **Add to `.env`:**
+
    ```bash
    # Option A: legacy OAuth 1.0a (default)
    TWITTER_AUTH_MODE=env
@@ -32,9 +37,15 @@ This package provides Twitter/X integration for the Eliza AI agent using the off
    # TWITTER_CLIENT_ID=xxx
    # TWITTER_REDIRECT_URI=http://127.0.0.1:8080/callback
 
+   # Option C: local simulator / compatible API
+   # TWITTER_AUTH_MODE=bearer
+   # TWITTER_BEARER_TOKEN=test_token
+   # TWITTER_API_BASE_URL=http://localhost:8080
+
    TWITTER_ENABLE_POST=true
    TWITTER_POST_IMMEDIATELY=true
    ```
+
 5. **Run:** `bun start`
 
 Tip: if you use **OAuth 2.0 PKCE**, the plugin will print an authorization URL on first run and store tokens for you (no manual token pasting).
@@ -91,16 +102,18 @@ TWITTER_THREAD_CONTEXT_MAX_DEPTH=8
 2. Configure exactly as shown:
 
    **App permissions**: `Read and write` ✅
-   
+
    **Type of App**: `Web App, Automated App or Bot`
-   
+
    **Required URLs** (copy these exactly):
+
    ```
    Callback URI: http://localhost:3000/callback
    Website URL: https://github.com/elizaos/eliza
    ```
-   
+
    **Optional fields**:
+
    ```
    Organization name: ElizaOS
    Organization URL: https://github.com/elizaos/eliza
@@ -137,6 +150,7 @@ In your app's **"Keys and tokens"** page, you'll see several sections. Here's wh
 ```
 
 **After enabling write permissions, you MUST:**
+
 1. Click **"Regenerate"** on Access Token & Secret
 2. Copy the NEW tokens (old ones won't have write access)
 3. Look for "Created with Read and Write permissions" ✅
@@ -149,6 +163,7 @@ Create or edit `.env` file in your project root:
 # Auth mode (default: env)
 # - env: legacy OAuth 1.0a keys/tokens
 # - oauth: “login + approve” OAuth 2.0 PKCE (no client secret in plugin)
+# - bearer: static bearer token (useful for local compatible playgrounds)
 # - broker: stub (not implemented yet)
 TWITTER_AUTH_MODE=env
 
@@ -167,6 +182,15 @@ TWITTER_ACCESS_TOKEN_SECRET=your_token_secret_here   # Regenerate after permissi
 # TWITTER_REDIRECT_URI=http://127.0.0.1:8080/callback
 # Optional:
 # TWITTER_SCOPES="tweet.read tweet.write users.read offline.access"
+# TWITTER_OAUTH2_AUTHORIZE_URL=https://twitter.com/i/oauth2/authorize
+# TWITTER_OAUTH2_TOKEN_URL=https://api.twitter.com/2/oauth2/token
+
+# ---- OR ----
+# Bearer mode (static token)
+# TWITTER_AUTH_MODE=bearer
+# TWITTER_BEARER_TOKEN=your_bearer_token_here
+# Optional API host override for compatible servers:
+# TWITTER_API_BASE_URL=http://localhost:8080
 
 # Basic Configuration
 TWITTER_DRY_RUN=false              # Set to true to test without posting
@@ -176,34 +200,47 @@ TWITTER_ENABLE_POST=true           # Enable autonomous tweet posting
 TWITTER_POST_IMMEDIATELY=true      # Post on startup (great for testing)
 TWITTER_POST_INTERVAL=120          # Minutes between posts (default: 120)
 # For more natural timing, use MIN/MAX intervals:
-TWITTER_POST_INTERVAL_MIN=90       # Minimum minutes between posts  
+TWITTER_POST_INTERVAL_MIN=90       # Minimum minutes between posts
 TWITTER_POST_INTERVAL_MAX=150      # Maximum minutes between posts
 ```
 
 When using **TWITTER_AUTH_MODE=oauth**, the plugin will:
+
 - Print an authorization URL on first run
 - Capture the callback via a local loopback server **or** ask you to paste the redirected URL
 - Persist tokens via Eliza runtime cache if available, otherwise a local token file at `~/.eliza/twitter/oauth2.tokens.json`
+
+For local simulator setups like `xdevplatform/playground`, use:
+
+```bash
+TWITTER_AUTH_MODE=bearer
+TWITTER_BEARER_TOKEN=test_token
+TWITTER_API_BASE_URL=http://localhost:8080
+```
+
+When `TWITTER_API_BASE_URL` is set, API/stream requests that normally target `*.x.com` or `*.twitter.com` are rewritten to that base URL.
 
 ### Step 5: Run Your Bot
 
 ```typescript
 // Your character should include the twitter plugin
 const character = {
-    // ... other config
-    plugins: [
-        "@elizaos/plugin-bootstrap",  // Required for content generation
-        "@elizaos/plugin-twitter"      // Twitter functionality
-    ],
-    postExamples: [                    // Examples for tweet generation
-        "Just discovered an amazing pattern in the data...",
-        "The future of AI is collaborative intelligence",
-        // ... more examples
-    ]
+  // ... other config
+  plugins: [
+    "@elizaos/plugin-bootstrap", // Required for content generation
+    "@elizaos/plugin-twitter", // Twitter functionality
+  ],
+  postExamples: [
+    // Examples for tweet generation
+    "Just discovered an amazing pattern in the data...",
+    "The future of AI is collaborative intelligence",
+    // ... more examples
+  ],
 };
 ```
 
 Then start your bot:
+
 ```bash
 bun run start
 ```
@@ -211,11 +248,31 @@ bun run start
 ## 📋 Complete Configuration Reference
 
 ```bash
+# Auth mode
+# - env (default): OAuth 1.0a keys + tokens
+# - oauth: OAuth 2.0 PKCE (interactive login)
+# - bearer: static bearer token
+# - broker: stub
+TWITTER_AUTH_MODE=env
+
 # Required Twitter API v2 Credentials (OAuth 1.0a)
 TWITTER_API_KEY=                    # Consumer API Key
 TWITTER_API_SECRET_KEY=             # Consumer API Secret
 TWITTER_ACCESS_TOKEN=               # Access Token (with write permissions)
 TWITTER_ACCESS_TOKEN_SECRET=        # Access Token Secret
+
+# OAuth 2.0 PKCE settings (used when TWITTER_AUTH_MODE=oauth)
+TWITTER_CLIENT_ID=
+TWITTER_REDIRECT_URI=
+TWITTER_SCOPES=tweet.read tweet.write users.read offline.access
+TWITTER_OAUTH2_AUTHORIZE_URL=       # Optional authorize endpoint override
+TWITTER_OAUTH2_TOKEN_URL=           # Optional token endpoint override
+
+# Bearer settings (used when TWITTER_AUTH_MODE=bearer)
+TWITTER_BEARER_TOKEN=
+
+# Optional Twitter-compatible API base URL override
+TWITTER_API_BASE_URL=               # Example: http://localhost:8080
 
 # Core Configuration
 TWITTER_DRY_RUN=false              # Set to true for testing without posting
@@ -237,7 +294,7 @@ TWITTER_POST_INTERVAL=120          # Fixed interval between posts (default: 120,
 TWITTER_POST_INTERVAL_MIN=90       # Minimum minutes between posts (default: 90)
 TWITTER_POST_INTERVAL_MAX=150      # Maximum minutes between posts (default: 150)
 
-# Engagement intervals  
+# Engagement intervals
 TWITTER_ENGAGEMENT_INTERVAL=30     # Fixed interval for interactions (default: 30, used if MIN/MAX not set)
 TWITTER_ENGAGEMENT_INTERVAL_MIN=20 # Minimum minutes between engagements (default: 20)
 TWITTER_ENGAGEMENT_INTERVAL_MAX=40 # Maximum minutes between engagements (default: 40)
@@ -262,6 +319,7 @@ The Twitter Discovery Service enables autonomous content discovery and engagemen
 ### Overview
 
 The discovery service autonomously:
+
 - Searches for content related to your agent's topics
 - Identifies high-quality accounts to follow
 - Engages with relevant tweets through likes, replies, and quotes
@@ -378,6 +436,7 @@ If you see errors like "Failed to create tweet: Request failed with code 403", t
    - Ensure you're not violating Twitter's automation rules
 
 The plugin will now:
+
 - Automatically detect and skip 403 errors with a warning
 - Continue processing other tweets
 - Mark failed tweets as "skip" to avoid retrying
@@ -389,6 +448,7 @@ The plugin will now:
 This is the #1 issue! Your app has read-only permissions.
 
 **Solution:**
+
 1. Go to app settings → "User authentication settings"
 2. Change to "Read and write"
 3. Save settings
@@ -403,6 +463,7 @@ This is the #1 issue! Your app has read-only permissions.
 This usually means your credentials don’t match your selected auth mode.
 
 **Solution:**
+
 - If `TWITTER_AUTH_MODE=env`:
   - Use credentials from "Consumer Keys" section (API Key/Secret)
   - Use credentials from "Authentication Tokens" section (Access Token/Secret)
@@ -411,10 +472,14 @@ This usually means your credentials don’t match your selected auth mode.
   - Use OAuth 2.0 **Client ID** (`TWITTER_CLIENT_ID`)
   - Set a loopback redirect URI (`TWITTER_REDIRECT_URI`, e.g. `http://127.0.0.1:8080/callback`)
   - Do not set/ship a client secret (PKCE flow)
+- If `TWITTER_AUTH_MODE=bearer`:
+  - Set `TWITTER_BEARER_TOKEN`
+  - If using a compatible simulator/server, set `TWITTER_API_BASE_URL` (example: `http://localhost:8080`)
 
 ### Bot Not Posting Automatically
 
 **Checklist:**
+
 - ✅ Is `TWITTER_ENABLE_POST=true`?
 - ✅ Is `@elizaos/plugin-bootstrap` installed?
 - ✅ Does your character have `postExamples`?
@@ -424,6 +489,7 @@ This usually means your credentials don’t match your selected auth mode.
 ### Timeline Not Loading
 
 **Common causes:**
+
 - Rate limiting (check Twitter Developer Portal)
 - Invalid credentials
 - Account restrictions
@@ -433,6 +499,7 @@ This usually means your credentials don’t match your selected auth mode.
 Your tokens may have been revoked or regenerated.
 
 **Solution:**
+
 1. Go to Twitter Developer Portal
 2. Regenerate all tokens
 3. Update `.env`
@@ -443,6 +510,7 @@ Your tokens may have been revoked or regenerated.
 ### Timeline Processing
 
 The plugin supports two main approaches:
+
 - **Timeline Actions**: Process home timeline for likes, retweets, and quotes
 - **Targeted Interactions**: Reply to mentions and specific users
 
@@ -462,6 +530,7 @@ TWITTER_TARGET_USERS=*
 ### Natural Posting Intervals
 
 The plugin adds variance to all intervals for more human-like behavior:
+
 - Post intervals vary by ±20% by default
 - Discovery intervals vary by ±10 minutes
 - Engagement intervals vary based on activity
@@ -469,6 +538,7 @@ The plugin adds variance to all intervals for more human-like behavior:
 ### Request Queue & Rate Limiting
 
 The plugin includes sophisticated rate limiting:
+
 - Automatic retry with exponential backoff
 - Request queue to prevent API abuse
 - Configurable retry limits
@@ -480,7 +550,7 @@ The plugin includes sophisticated rate limiting:
 # Run tests
 bun test
 
-# Run with debug logging  
+# Run with debug logging
 DEBUG=eliza:* bun start
 
 # Test without posting
@@ -506,6 +576,7 @@ TWITTER_DRY_RUN=true bun start
 ## 📊 API Usage & Limits
 
 This plugin uses Twitter API v2 endpoints efficiently:
+
 - **Home Timeline**: Cached and refreshed periodically
 - **Tweet Creation**: Rate limited automatically
 - **User Lookups**: Cached to reduce calls
@@ -524,6 +595,7 @@ Monitor your usage at: https://developer.twitter.com/en/portal/dashboard
 ## 🤝 Contributing
 
 Contributions are welcome! Please:
+
 1. Check existing issues first
 2. Follow the code style
 3. Add tests for new features

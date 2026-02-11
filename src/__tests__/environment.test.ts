@@ -27,6 +27,10 @@ describe("Environment Configuration", () => {
     vi.stubEnv("TWITTER_CLIENT_ID", "");
     vi.stubEnv("TWITTER_REDIRECT_URI", "");
     vi.stubEnv("TWITTER_BROKER_URL", "");
+    vi.stubEnv("TWITTER_BEARER_TOKEN", "");
+    vi.stubEnv("TWITTER_API_BASE_URL", "");
+    vi.stubEnv("TWITTER_OAUTH2_AUTHORIZE_URL", "");
+    vi.stubEnv("TWITTER_OAUTH2_TOKEN_URL", "");
   });
 
   describe("shouldTargetUser", () => {
@@ -127,7 +131,9 @@ describe("Environment Configuration", () => {
       const config = await validateTwitterConfig(mockRuntime);
       expect(config.TWITTER_AUTH_MODE).toBe("oauth");
       expect(config.TWITTER_CLIENT_ID).toBe("client-id");
-      expect(config.TWITTER_REDIRECT_URI).toBe("http://127.0.0.1:8080/callback");
+      expect(config.TWITTER_REDIRECT_URI).toBe(
+        "http://127.0.0.1:8080/callback",
+      );
     });
 
     it("should throw when oauth mode is missing required fields", async () => {
@@ -155,6 +161,35 @@ describe("Environment Configuration", () => {
 
       await expect(validateTwitterConfig(mockRuntime)).rejects.toThrow(
         "Twitter broker auth is selected",
+      );
+    });
+
+    it("should validate bearer mode without oauth/env credentials", async () => {
+      mockRuntime.getSetting = vi.fn((key) => {
+        const settings: Record<string, string> = {
+          TWITTER_AUTH_MODE: "bearer",
+          TWITTER_BEARER_TOKEN: "playground-token",
+          TWITTER_API_BASE_URL: "http://localhost:8080",
+        };
+        return settings[key];
+      });
+
+      const config = await validateTwitterConfig(mockRuntime);
+      expect(config.TWITTER_AUTH_MODE).toBe("bearer");
+      expect(config.TWITTER_BEARER_TOKEN).toBe("playground-token");
+      expect(config.TWITTER_API_BASE_URL).toBe("http://localhost:8080");
+    });
+
+    it("should throw when bearer mode is missing token", async () => {
+      mockRuntime.getSetting = vi.fn((key) => {
+        const settings: Record<string, string> = {
+          TWITTER_AUTH_MODE: "bearer",
+        };
+        return settings[key];
+      });
+
+      await expect(validateTwitterConfig(mockRuntime)).rejects.toThrow(
+        "Twitter bearer auth is selected",
       );
     });
 

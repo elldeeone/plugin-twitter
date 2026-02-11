@@ -1,6 +1,77 @@
-import { TwitterApi } from "twitter-api-v2";
+import {
+  TwitterApi,
+  type IClientSettings,
+  type ITwitterApiClientPlugin,
+} from "twitter-api-v2";
 import { Profile } from "./profile";
-import type { TwitterAuthProvider, TwitterOAuth1Provider } from "./auth-providers/types";
+import type {
+  TwitterAuthProvider,
+  TwitterOAuth1Provider,
+} from "./auth-providers/types";
+
+const TWITTER_HOST_SUFFIXES = [".twitter.com", ".x.com"];
+
+function isTwitterHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return (
+    normalized === "twitter.com" ||
+    normalized === "x.com" ||
+    TWITTER_HOST_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
+  );
+}
+
+function parseApiBaseUrl(rawValue: string | undefined): URL | undefined {
+  const value = rawValue?.trim();
+  if (!value) {
+    return undefined;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(
+      `Invalid TWITTER_API_BASE_URL=${rawValue}. Expected absolute URL like http://localhost:8080`,
+    );
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      `Invalid TWITTER_API_BASE_URL=${rawValue}. Expected an http:// or https:// URL`,
+    );
+  }
+
+  return parsed;
+}
+
+function joinPath(basePath: string, requestPath: string): string {
+  const normalizedBase = basePath === "/" ? "" : basePath.replace(/\/+$/, "");
+  const normalizedRequest = requestPath.startsWith("/")
+    ? requestPath
+    : `/${requestPath}`;
+  return `${normalizedBase}${normalizedRequest}` || "/";
+}
+
+function rewriteTwitterApiUrl(rawUrl: string, baseUrl: URL): string {
+  let requestUrl: URL;
+  try {
+    requestUrl = new URL(rawUrl);
+  } catch {
+    return rawUrl;
+  }
+
+  if (!isTwitterHost(requestUrl.hostname)) {
+    return rawUrl;
+  }
+
+  requestUrl.protocol = baseUrl.protocol;
+  requestUrl.hostname = baseUrl.hostname;
+  requestUrl.port = baseUrl.port;
+  requestUrl.username = baseUrl.username;
+  requestUrl.password = baseUrl.password;
+  requestUrl.pathname = joinPath(baseUrl.pathname, requestUrl.pathname);
+  return requestUrl.toString();
+}
 
 /**
  * Twitter API v2 authentication using developer credentials
@@ -12,6 +83,7 @@ export class TwitterAuth {
   private loggedOut = false;
 
   private lastAccessToken?: string;
+  private lastClientSignature?: string;
 
   constructor(private readonly provider: TwitterAuthProvider) {
     // Backward-compatible behavior: legacy OAuth1 provider is considered authenticated immediately,
@@ -25,30 +97,80 @@ export class TwitterAuth {
     return typeof (p as any).getOAuth1Credentials === "function";
   }
 
+  private buildClientSettings(
+    apiBaseUrl: string | undefined,
+  ): Partial<IClientSettings> | undefined {
+    const parsedBaseUrl = parseApiBaseUrl(apiBaseUrl);
+    if (!parsedBaseUrl) {
+      return undefined;
+    }
+
+    const rewritePlugin: ITwitterApiClientPlugin = {
+      onBeforeRequestConfig: ({ params }) => {
+        params.url = rewriteTwitterApiUrl(params.url, parsedBaseUrl);
+      },
+      onBeforeStreamRequestConfig: ({ params }) => {
+        params.url = rewriteTwitterApiUrl(params.url, parsedBaseUrl);
+      },
+    };
+
+    return {
+      plugins: [rewritePlugin],
+    };
+  }
+
+  private buildClientSignature(
+    mode: "oauth1" | "token",
+    token: string,
+    apiBaseUrl: string | undefined,
+  ): string {
+    return [mode, token, apiBaseUrl?.trim() || ""].join("|");
+  }
+
   private async ensureClientInitialized(): Promise<void> {
     if (this.loggedOut) {
       throw new Error("Twitter API client not initialized");
     }
     if (this.isOAuth1Provider(this.provider)) {
-      if (this.v2Client) return;
       const creds = await this.provider.getOAuth1Credentials();
-      this.v2Client = new TwitterApi({
-        appKey: creds.appKey,
-        appSecret: creds.appSecret,
-        accessToken: creds.accessToken,
-        accessSecret: creds.accessSecret,
-      });
+      const apiBaseUrl = this.provider.getApiBaseUrl?.();
+      const signature = this.buildClientSignature(
+        "oauth1",
+        `${creds.appKey}:${creds.accessToken}`,
+        apiBaseUrl,
+      );
+
+      if (!this.v2Client || this.lastClientSignature !== signature) {
+        this.v2Client = new TwitterApi(
+          {
+            appKey: creds.appKey,
+            appSecret: creds.appSecret,
+            accessToken: creds.accessToken,
+            accessSecret: creds.accessSecret,
+          },
+          this.buildClientSettings(apiBaseUrl),
+        );
+        this.lastClientSignature = signature;
+      }
+
       this.authenticated = true;
       this.lastAccessToken = creds.accessToken;
       return;
     }
 
     const token = await this.provider.getAccessToken();
-    if (!this.v2Client || this.lastAccessToken !== token) {
+    const apiBaseUrl = this.provider.getApiBaseUrl?.();
+    const signature = this.buildClientSignature("token", token, apiBaseUrl);
+
+    if (!this.v2Client || this.lastClientSignature !== signature) {
       // OAuth2 user context token: Bearer token
-      this.v2Client = new TwitterApi(token);
+      this.v2Client = new TwitterApi(
+        token,
+        this.buildClientSettings(apiBaseUrl),
+      );
       this.authenticated = true;
       this.lastAccessToken = token;
+      this.lastClientSignature = signature;
     }
   }
 
@@ -142,6 +264,7 @@ export class TwitterAuth {
     this.authenticated = false;
     this.profile = undefined;
     this.lastAccessToken = undefined;
+    this.lastClientSignature = undefined;
     this.loggedOut = true;
   }
 
