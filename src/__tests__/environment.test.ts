@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   validateTwitterConfig,
   shouldTargetUser,
+  isTrustedLearningUser,
   twitterEnvSchema,
 } from "../environment";
 import type { IAgentRuntime } from "@elizaos/core";
@@ -64,6 +65,24 @@ describe("Environment Configuration", () => {
       expect(shouldTargetUser("ALICE", targetUsers)).toBe(true);
       expect(shouldTargetUser("bob", targetUsers)).toBe(true);
       expect(shouldTargetUser("charlie", targetUsers)).toBe(true);
+    });
+  });
+
+  describe("isTrustedLearningUser", () => {
+    it("should return false when no trusted users are configured", () => {
+      expect(isTrustedLearningUser("alice", "")).toBe(false);
+      expect(isTrustedLearningUser("alice", "   ")).toBe(false);
+    });
+
+    it("should support wildcard trusted users", () => {
+      expect(isTrustedLearningUser("alice", "*")).toBe(true);
+      expect(isTrustedLearningUser("bob", "*,charlie")).toBe(true);
+    });
+
+    it("should match trusted users case-insensitively", () => {
+      expect(isTrustedLearningUser("alice", "Alice,@bob")).toBe(true);
+      expect(isTrustedLearningUser("@bob", "Alice,@bob")).toBe(true);
+      expect(isTrustedLearningUser("charlie", "Alice,@bob")).toBe(false);
     });
   });
 
@@ -158,6 +177,9 @@ describe("Environment Configuration", () => {
       expect(config.TWITTER_POST_INTERVAL_MAX).toBe("180");
       expect(config.TWITTER_ENABLE_POST).toBe("false");
       expect(config.TWITTER_DRY_RUN).toBe("false");
+      expect(config.TWITTER_ENABLE_LEARNING).toBe("true");
+      expect(config.TWITTER_LEARNING_MAX_MEMORIES).toBe("5");
+      expect(config.TWITTER_THREAD_CONTEXT_MAX_DEPTH).toBe("8");
     });
 
     it("should parse boolean settings correctly", async () => {

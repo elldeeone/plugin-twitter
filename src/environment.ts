@@ -30,6 +30,10 @@ export const twitterEnvSchema = z.object({
   // Core configuration
   TWITTER_DRY_RUN: z.string().default("false"),
   TWITTER_TARGET_USERS: z.string().default(""), // comma-separated list, empty = all
+  TWITTER_ENABLE_LEARNING: z.string().default("true"),
+  TWITTER_LEARNING_TRUSTED_USERS: z.string().default(""), // comma-separated usernames, "*" = everyone
+  TWITTER_LEARNING_MAX_MEMORIES: z.string().default("5"),
+  TWITTER_THREAD_CONTEXT_MAX_DEPTH: z.string().default("8"),
 
   // Feature toggles
   TWITTER_ENABLE_POST: z.string().default("false"),
@@ -68,11 +72,11 @@ function safeParseInt(value: string | undefined, defaultValue: number): number {
 /**
  * Helper to parse a comma-separated list of Twitter usernames
  */
-function parseTargetUsers(targetUsersStr?: string | null): string[] {
-  if (!targetUsersStr?.trim()) {
+export function parseUsernameList(usernames?: string | null): string[] {
+  if (!usernames?.trim()) {
     return [];
   }
-  return targetUsersStr
+  return usernames
     .split(",")
     .map((user) => user.trim())
     .filter(Boolean);
@@ -91,7 +95,7 @@ export function shouldTargetUser(
     return true; // Empty = interact with everyone
   }
 
-  const targetUsers = parseTargetUsers(targetUsersConfig);
+  const targetUsers = parseUsernameList(targetUsersConfig);
 
   if (targetUsers.includes("*")) {
     return true; // Wildcard = everyone
@@ -108,9 +112,34 @@ export function shouldTargetUser(
  * Get parsed target users list
  */
 export function getTargetUsers(targetUsersConfig: string): string[] {
-  const users = parseTargetUsers(targetUsersConfig);
+  const users = parseUsernameList(targetUsersConfig);
   // Filter out wildcard since it's a special case
   return users.filter((u) => u !== "*");
+}
+
+/**
+ * Check if a user is trusted for learning/correction capture
+ * Empty list means trust no one (explicit opt-in whitelist)
+ * "*" wildcard means trust everyone
+ */
+export function isTrustedLearningUser(
+  username: string,
+  trustedUsersConfig: string,
+): boolean {
+  if (!trustedUsersConfig?.trim()) {
+    return false;
+  }
+
+  const trustedUsers = parseUsernameList(trustedUsersConfig);
+
+  if (trustedUsers.includes("*")) {
+    return true;
+  }
+
+  const normalizedUsername = username.toLowerCase().replace(/^@/, "");
+  return trustedUsers.some(
+    (trusted) => trusted.toLowerCase().replace(/^@/, "") === normalizedUsername,
+  );
 }
 
 /**
@@ -171,6 +200,31 @@ export async function validateTwitterConfig(
         config.TWITTER_TARGET_USERS ??
         getSetting(runtime, "TWITTER_TARGET_USERS") ??
         "",
+      TWITTER_ENABLE_LEARNING: String(
+        (
+          (config as any).TWITTER_ENABLE_LEARNING ??
+          getSetting(runtime, "TWITTER_ENABLE_LEARNING") ??
+          "true"
+        ).toLowerCase() === "true",
+      ),
+      TWITTER_LEARNING_TRUSTED_USERS:
+        (config as any).TWITTER_LEARNING_TRUSTED_USERS ??
+        getSetting(runtime, "TWITTER_LEARNING_TRUSTED_USERS") ??
+        "",
+      TWITTER_LEARNING_MAX_MEMORIES: String(
+        safeParseInt(
+          (config as any).TWITTER_LEARNING_MAX_MEMORIES ??
+            getSetting(runtime, "TWITTER_LEARNING_MAX_MEMORIES"),
+          5,
+        ),
+      ),
+      TWITTER_THREAD_CONTEXT_MAX_DEPTH: String(
+        safeParseInt(
+          (config as any).TWITTER_THREAD_CONTEXT_MAX_DEPTH ??
+            getSetting(runtime, "TWITTER_THREAD_CONTEXT_MAX_DEPTH"),
+          8,
+        ),
+      ),
       TWITTER_ENABLE_POST: String(
         (
           config.TWITTER_ENABLE_POST ??
@@ -370,6 +424,13 @@ function getDefaultConfig(): TwitterConfig {
     TWITTER_BROKER_URL: getConfig("TWITTER_BROKER_URL") || "",
     TWITTER_DRY_RUN: getConfig("TWITTER_DRY_RUN") || "false",
     TWITTER_TARGET_USERS: getConfig("TWITTER_TARGET_USERS") || "",
+    TWITTER_ENABLE_LEARNING: getConfig("TWITTER_ENABLE_LEARNING") || "true",
+    TWITTER_LEARNING_TRUSTED_USERS:
+      getConfig("TWITTER_LEARNING_TRUSTED_USERS") || "",
+    TWITTER_LEARNING_MAX_MEMORIES:
+      getConfig("TWITTER_LEARNING_MAX_MEMORIES") || "5",
+    TWITTER_THREAD_CONTEXT_MAX_DEPTH:
+      getConfig("TWITTER_THREAD_CONTEXT_MAX_DEPTH") || "8",
     TWITTER_ENABLE_POST: getConfig("TWITTER_ENABLE_POST") || "false",
     TWITTER_ENABLE_REPLIES: getConfig("TWITTER_ENABLE_REPLIES") || "true",
     TWITTER_ENABLE_ACTIONS: getConfig("TWITTER_ENABLE_ACTIONS") || "false",

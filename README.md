@@ -44,12 +44,30 @@ Tip: if you use **OAuth 2.0 PKCE**, the plugin will print an authorization URL o
 - ✅ **Autonomous tweet posting** with configurable intervals
 - ✅ **Timeline monitoring** and interaction
 - ✅ **Mention and reply handling**
+- ✅ **Thread context reconstruction** (hydrates parent tweets so deep replies keep conversation context)
 - ✅ **Search functionality**
 - ✅ **Direct message support**
 - ✅ **Advanced timeline algorithms** with weighted scoring
 - ✅ **Comprehensive caching system**
 - ✅ **Built-in rate limiting and retry mechanisms**
 - ✅ **Discovery service** for autonomous content discovery and growth
+- ✅ **Trusted correction learning** (optional whitelist-based fact capture from trusted users)
+
+### Trusted Learning + Thread Context Settings
+
+```bash
+# Enable/disable trusted correction learning
+TWITTER_ENABLE_LEARNING=true
+
+# Whitelist of accounts whose corrections should be learned (empty = disabled, '*' = everyone)
+TWITTER_LEARNING_TRUSTED_USERS=alice,bob
+
+# Max learned correction memories to inject into reply context
+TWITTER_LEARNING_MAX_MEMORIES=5
+
+# How many ancestor tweets to hydrate when reconstructing thread context
+TWITTER_THREAD_CONTEXT_MAX_DEPTH=8
+```
 
 ## Prerequisites
 

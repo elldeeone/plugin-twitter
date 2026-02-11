@@ -214,7 +214,7 @@ export class ClientBase {
    * @param {string} tweetId - The ID of the tweet to retrieve.
    * @returns {Promise<Tweet>} A Promise that resolves to the retrieved tweet.
    */
-  async getTweet(tweetId: string): Promise<Tweet> {
+  async getTweet(tweetId: string): Promise<Tweet | null> {
     const cachedTweet = await this.getCachedTweet(tweetId);
 
     if (cachedTweet) {
@@ -224,6 +224,11 @@ export class ClientBase {
     const tweet = await this.requestQueue.add(() =>
       this.twitterClient.getTweet(tweetId),
     );
+
+    if (!tweet) {
+      logger.warn(`Tweet ${tweetId} not found`);
+      return null;
+    }
 
     await this.cacheTweet(tweet);
     return tweet;

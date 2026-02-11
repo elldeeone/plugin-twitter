@@ -1,7 +1,5 @@
 import {
-  ChannelType,
   type Content,
-  ContentType,
   EventType,
   type HandlerCallback,
   type IAgentRuntime,
@@ -25,7 +23,11 @@ import type {
 } from './types';
 import { TwitterEventTypes } from './types';
 import { sendTweet } from './utils';
-import { shouldTargetUser, getTargetUsers } from './environment';
+import {
+  shouldTargetUser,
+  getTargetUsers,
+  isTrustedLearningUser,
+} from './environment';
 import { getSetting } from './utils/settings';
 import { getRandomInterval } from './environment';
 import { getEpochMs } from './utils/time';
@@ -67,6 +69,17 @@ export const messageHandlerTemplate = `
 
 # Instructions: Write a thoughtful response to {{senderName}} that is appropriate and relevant to their message. Do not including any thinking, self-reflection or internal dialog in your response.`;
 
+const CORRECTION_PATTERNS = [
+  /\bactually\b/i,
+  /\bcorrection\b/i,
+  /\byou(?:'re| are| were)?\s+wrong\b/i,
+  /\bnot\s+(?:true|correct|accurate)\b/i,
+  /\byou\s+mean\b/i,
+  /\bshould\s+be\b/i,
+  /\bit'?s\s+.+\s+not\b/i,
+  /\bfyi\b/i,
+];
+
 /**
  * The TwitterInteractionClient class manages Twitter interactions,
  * including handling mentions, managing timelines, and engaging with other users.
@@ -105,6 +118,227 @@ export class TwitterInteractionClient {
       dryRunSetting === true ||
       dryRunSetting === 'true' ||
       (typeof dryRunSetting === 'string' && dryRunSetting.toLowerCase() === 'true');
+  }
+
+  private getBooleanSetting(key: string, defaultValue: boolean): boolean {
+    const value = getSetting(this.runtime, key);
+
+    if (value === undefined || value === null || value === '') {
+      return defaultValue;
+    }
+
+    const normalized = String(value).trim().toLowerCase();
+    return ['1', 'true', 'yes', 'on'].includes(normalized);
+  }
+
+  private getPositiveIntSetting(key: string, defaultValue: number): number {
+    const raw = getSetting(this.runtime, key);
+    const parsed = Number.parseInt(String(raw ?? ''), 10);
+
+    if (Number.isNaN(parsed) || parsed <= 0) {
+      return defaultValue;
+    }
+
+    return parsed;
+  }
+
+  private async fetchThreadContext(tweet: ClientTweet): Promise<ClientTweet[]> {
+    if (!tweet?.id) {
+      return tweet ? [tweet] : [];
+    }
+
+    const maxDepth = this.getPositiveIntSetting('TWITTER_THREAD_CONTEXT_MAX_DEPTH', 8);
+    const threadMap = new Map<string, ClientTweet>();
+    const conversationId = tweet.conversationId || tweet.id;
+    const addTweet = (candidate?: ClientTweet | null) => {
+      if (!candidate?.id) {
+        return;
+      }
+
+      if (!candidate.conversationId) {
+        candidate.conversationId = conversationId;
+      }
+
+      threadMap.set(candidate.id, candidate);
+    };
+
+    addTweet(tweet);
+
+    let currentParentId = tweet.inReplyToStatusId;
+    let depth = 0;
+
+    while (currentParentId && depth < maxDepth) {
+      if (threadMap.has(currentParentId)) {
+        break;
+      }
+
+      const parentTweet = await this.client.getTweet(currentParentId);
+      if (!parentTweet) {
+        break;
+      }
+
+      addTweet(parentTweet);
+      currentParentId = parentTweet.inReplyToStatusId;
+      depth += 1;
+    }
+
+    if (conversationId && !threadMap.has(conversationId) && depth < maxDepth) {
+      const rootTweet = await this.client.getTweet(conversationId);
+      if (rootTweet) {
+        addTweet(rootTweet);
+      }
+    }
+
+    return [...threadMap.values()].sort(
+      (a, b) => getEpochMs(a.timestamp) - getEpochMs(b.timestamp)
+    );
+  }
+
+  private async hydrateThreadMemories(thread: ClientTweet[]) {
+    for (const contextTweet of thread) {
+      if (!contextTweet?.id || !contextTweet?.userId || !contextTweet?.username) {
+        continue;
+      }
+
+      const context = await ensureContext(this.runtime, {
+        userId: contextTweet.userId,
+        username: contextTweet.username,
+        name: contextTweet.name,
+        conversationId: contextTweet.conversationId || contextTweet.id,
+      });
+
+      const tweetMemory: Memory = {
+        id: createUniqueUuid(this.runtime, contextTweet.id),
+        entityId: context.entityId,
+        content: {
+          text: contextTweet.text,
+          url: contextTweet.permanentUrl,
+          source: 'twitter',
+          tweet: contextTweet,
+          inReplyTo: contextTweet.inReplyToStatusId
+            ? createUniqueUuid(this.runtime, contextTweet.inReplyToStatusId)
+            : undefined,
+        },
+        agentId: this.runtime.agentId,
+        roomId: context.roomId,
+        createdAt: getEpochMs(contextTweet.timestamp),
+      };
+
+      await createMemorySafe(this.runtime, tweetMemory, 'messages');
+    }
+  }
+
+  private isLearningEnabled(): boolean {
+    return this.getBooleanSetting('TWITTER_ENABLE_LEARNING', true);
+  }
+
+  private getLearningTrustedUsersConfig(): string {
+    return (getSetting(this.runtime, 'TWITTER_LEARNING_TRUSTED_USERS') as string) || '';
+  }
+
+  private isPotentialCorrection(text?: string): boolean {
+    if (!text?.trim()) {
+      return false;
+    }
+
+    return CORRECTION_PATTERNS.some((pattern) => pattern.test(text));
+  }
+
+  private async saveTrustedCorrection(
+    tweet: ClientTweet,
+    entityId: Memory['entityId'],
+    roomId: Memory['roomId']
+  ): Promise<void> {
+    try {
+      if (!this.isLearningEnabled()) {
+        return;
+      }
+
+      const trustedUsers = this.getLearningTrustedUsersConfig();
+      if (!isTrustedLearningUser(tweet.username || '', trustedUsers)) {
+        return;
+      }
+
+      if (!this.isPotentialCorrection(tweet.text)) {
+        return;
+      }
+
+      if (!tweet.id) {
+        return;
+      }
+
+      const correctionMemory: Memory = {
+        id: createUniqueUuid(this.runtime, `twitter-correction-${tweet.id}`),
+        entityId,
+        agentId: this.runtime.agentId,
+        roomId,
+        content: {
+          text: tweet.text,
+          source: 'twitter',
+          type: 'twitter_correction',
+          url: tweet.permanentUrl,
+          tweetId: tweet.id,
+          username: tweet.username,
+        },
+        metadata: {
+          type: 'twitter_correction',
+          source: 'twitter',
+          scope: 'shared',
+          tags: ['twitter', 'correction', tweet.username || 'unknown'],
+        },
+        createdAt: getEpochMs(tweet.timestamp),
+      };
+
+      await createMemorySafe(this.runtime, correctionMemory, 'facts');
+      logger.info(`Learned trusted correction from @${tweet.username} (${tweet.id})`);
+    } catch (error) {
+      logger.warn(`Failed to persist trusted correction for tweet ${tweet.id}:`, error);
+    }
+  }
+
+  private async getTrustedCorrectionContext(
+    entityId: Memory['entityId'],
+    username: string
+  ): Promise<string | null> {
+    const maxMemories = this.getPositiveIntSetting('TWITTER_LEARNING_MAX_MEMORIES', 5);
+    let userFacts: Memory[] = [];
+
+    try {
+      userFacts = await this.runtime.getMemories({
+        tableName: 'facts',
+        entityId,
+        count: maxMemories * 3,
+        unique: false,
+      });
+    } catch (error) {
+      logger.debug('Failed to load trusted correction context:', error);
+      return null;
+    }
+
+    const correctionSummaries = userFacts
+      .filter((memory) => {
+        const metadataType = typeof memory.metadata?.type === 'string' ? memory.metadata.type : '';
+        const contentType = typeof memory.content?.type === 'string' ? memory.content.type : '';
+        return metadataType === 'twitter_correction' || contentType === 'twitter_correction';
+      })
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, maxMemories)
+      .map((memory) => memory.content?.text)
+      .filter((text): text is string => Boolean(text?.trim()));
+
+    if (correctionSummaries.length === 0) {
+      return null;
+    }
+
+    const bullets = correctionSummaries
+      .map((summary, index) => `${index + 1}. ${summary}`)
+      .join('\n');
+
+    return [
+      `[Internal context: prior trusted corrections from @${username}]`,
+      bullets,
+      'Use this context only to improve factual accuracy.',
+    ].join('\n');
   }
 
   /**
@@ -344,6 +578,17 @@ export class TwitterInteractionClient {
    */
   private async shouldEngageWithTweet(tweet: ClientTweet): Promise<boolean> {
     try {
+      if (!tweet?.id || !tweet.userId || !tweet.username) {
+        return false;
+      }
+
+      const context = await ensureContext(this.runtime, {
+        userId: tweet.userId,
+        username: tweet.username,
+        name: tweet.name,
+        conversationId: tweet.conversationId || tweet.id,
+      });
+
       // Create a simple evaluation prompt
       const evaluationContext = {
         tweet: tweet.text,
@@ -357,9 +602,9 @@ export class TwitterInteractionClient {
 
       const shouldEngageMemory: Memory = {
         id: createUniqueUuid(this.runtime, `eval-${tweet.id}`),
-        entityId: this.runtime.agentId,
+        entityId: context.entityId,
         agentId: this.runtime.agentId,
-        roomId: createUniqueUuid(this.runtime, tweet.conversationId),
+        roomId: context.roomId,
         content: {
           text: `Should I engage with this tweet? Tweet: "${tweet.text}" by @${tweet.username}`,
           evaluationContext,
@@ -369,7 +614,7 @@ export class TwitterInteractionClient {
 
       const state = await this.runtime.composeState(shouldEngageMemory);
       const characterName = this.runtime?.character?.name || 'AI Assistant';
-      const context = `You are ${characterName}. Should you reply to this tweet based on your interests and expertise?
+      const prompt = `You are ${characterName}. Should you reply to this tweet based on your interests and expertise?
       
 Tweet by @${tweet.username}: "${tweet.text}"
 
@@ -386,7 +631,7 @@ Reply with NO if:
 Response (YES/NO):`;
 
       const response = await this.runtime.useModel(ModelType.TEXT_SMALL, {
-        prompt: context,
+        prompt,
         temperature: 0.3,
         maxTokens: 10,
         stop: ['\n'],
@@ -404,6 +649,10 @@ Response (YES/NO):`;
    */
   private async ensureTweetContext(tweet: ClientTweet) {
     try {
+      if (!tweet?.id || !tweet.userId || !tweet.username) {
+        throw new Error(`Tweet ${tweet?.id || 'unknown'} is missing required context fields`);
+      }
+
       const context = await ensureContext(this.runtime, {
         userId: tweet.userId,
         username: tweet.username,
@@ -420,6 +669,9 @@ Response (YES/NO):`;
           url: tweet.permanentUrl,
           source: 'twitter',
           tweet,
+          inReplyTo: tweet.inReplyToStatusId
+            ? createUniqueUuid(this.runtime, tweet.inReplyToStatusId)
+            : undefined,
         },
         agentId: this.runtime.agentId,
         roomId: context.roomId,
@@ -438,23 +690,37 @@ Response (YES/NO):`;
    */
   private async engageWithTweet(tweet: ClientTweet): Promise<boolean> {
     try {
+      if (!tweet?.id || !tweet.userId || !tweet.username) {
+        return false;
+      }
+
+      const context = await ensureContext(this.runtime, {
+        userId: tweet.userId,
+        username: tweet.username,
+        name: tweet.name,
+        conversationId: tweet.conversationId || tweet.id,
+      });
+
       const message: Memory = {
         id: createUniqueUuid(this.runtime, tweet.id),
-        entityId: createUniqueUuid(this.runtime, tweet.userId),
+        entityId: context.entityId,
         content: {
           text: tweet.text,
           source: 'twitter',
           tweet,
         },
         agentId: this.runtime.agentId,
-        roomId: createUniqueUuid(this.runtime, tweet.conversationId),
+        roomId: context.roomId,
         createdAt: getEpochMs(tweet.timestamp),
       };
 
+      const threadContext = await this.fetchThreadContext(tweet);
+      await this.hydrateThreadMemories(threadContext);
+
       const result = await this.handleTweet({
-        tweet,
+        tweet: { ...tweet, thread: threadContext },
         message,
-        thread: tweet.thread || [tweet],
+        thread: threadContext.length > 0 ? threadContext : [tweet],
       });
 
       return result.text && result.text.length > 0;
@@ -480,7 +746,7 @@ Response (YES/NO):`;
 
     // Sort tweet candidates by ID in ascending order
     uniqueTweetCandidates = uniqueTweetCandidates
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .sort((a, b) => (a.id || '').localeCompare(b.id || ''))
       .filter((tweet) => tweet.userId !== this.client.profile.id);
 
     // Get TWITTER_TARGET_USERS configuration
@@ -514,7 +780,26 @@ Response (YES/NO):`;
 
     // for each tweet candidate, handle the tweet
     for (const tweet of tweetsToProcess) {
+      if (!tweet?.id || !tweet.userId || !tweet.username) {
+        logger.warn('Skipping mention tweet with incomplete author/tweet data');
+        continue;
+      }
+
       if (!this.client.lastCheckedTweetId || BigInt(tweet.id) > this.client.lastCheckedTweetId) {
+        const conversationId = tweet.conversationId || tweet.id;
+        tweet.conversationId = conversationId;
+
+        const context = await ensureContext(this.runtime, {
+          userId: tweet.userId,
+          username: tweet.username,
+          name: tweet.name,
+          conversationId,
+        });
+
+        const threadContext = await this.fetchThreadContext(tweet);
+        tweet.thread = threadContext;
+        await this.hydrateThreadMemories(threadContext);
+
         // Generate the tweetId UUID the same way it's done in handleTweet
         const tweetId = createUniqueUuid(this.runtime, tweet.id);
 
@@ -528,10 +813,9 @@ Response (YES/NO):`;
 
         // Also check if we've already responded to this tweet (for chunked responses)
         // by looking for any memory with inReplyTo pointing to this tweet
-        const conversationRoomId = createUniqueUuid(this.runtime, tweet.conversationId);
         const existingReplies = await this.runtime.getMemories({
           tableName: 'messages',
-          roomId: conversationRoomId,
+          roomId: context.roomId,
           count: 10, // Check recent messages in this room
         });
 
@@ -549,74 +833,34 @@ Response (YES/NO):`;
 
         logger.log('New Tweet found', tweet.id);
 
-        const userId = tweet.userId;
-        const conversationId = tweet.conversationId || tweet.id;
-        const roomId = createUniqueUuid(this.runtime, conversationId);
-        const username = tweet.username;
-
         logger.log('----');
-        logger.log(`User: ${username} (${userId})`);
+        logger.log(`User: ${tweet.username} (${tweet.userId})`);
         logger.log(`Tweet: ${tweet.id}`);
         logger.log(`Conversation: ${conversationId}`);
-        logger.log(`Room: ${roomId}`);
+        logger.log(`Room: ${context.roomId}`);
         logger.log('----');
-
-        // 1. Ensure world exists for the user
-        const worldId = createUniqueUuid(this.runtime, userId);
-        await this.runtime.ensureWorldExists({
-          id: worldId,
-          name: `${username}'s Twitter`,
-          agentId: this.runtime.agentId,
-          serverId: userId,
-          metadata: {
-            ownership: { ownerId: userId },
-            twitter: {
-              username: username,
-              id: userId,
-            },
-          },
-        });
-
-        // 2. Ensure entity connection
-        const entityId = createUniqueUuid(this.runtime, userId);
-        await this.runtime.ensureConnection({
-          entityId,
-          roomId,
-          userName: username,
-          name: tweet.name,
-          source: 'twitter',
-          type: ChannelType.FEED,
-          worldId: worldId,
-        });
-
-        // 2.5. Ensure room exists
-        await this.runtime.ensureRoomExists({
-          id: roomId,
-          name: `Twitter conversation ${conversationId}`,
-          source: 'twitter',
-          type: ChannelType.FEED,
-          channelId: conversationId,
-          serverId: userId,
-          worldId: worldId,
-        });
 
         // 3. Create a memory for the tweet
         const memory: Memory = {
           id: tweetId,
-          entityId,
+          entityId: context.entityId,
           content: {
             text: tweet.text,
             url: tweet.permanentUrl,
             source: 'twitter',
             tweet,
+            inReplyTo: tweet.inReplyToStatusId
+              ? createUniqueUuid(this.runtime, tweet.inReplyToStatusId)
+              : undefined,
           },
           agentId: this.runtime.agentId,
-          roomId,
+          roomId: context.roomId,
           createdAt: getEpochMs(tweet.timestamp),
         };
 
         logger.log('Saving tweet memory...');
         await createMemorySafe(this.runtime, memory, 'messages');
+        await this.saveTrustedCorrection(tweet, context.entityId, context.roomId);
 
         // TODO: This doesn't work as intended - thread events are mixed with other events
         //       and need a better implementation strategy
@@ -628,15 +872,15 @@ Response (YES/NO):`;
         // });
 
         // 4. Handle thread-specific events
-        if (tweet.thread && tweet.thread.length > 0) {
+        if (tweet.thread && tweet.thread.length > 0 && tweet.thread[0].id) {
           const threadStartId = tweet.thread[0].id;
           const threadMemoryId = createUniqueUuid(this.runtime, `thread-${threadStartId}`);
 
           const threadPayload = {
             runtime: this.runtime,
-            entityId,
+            entityId: context.entityId,
             conversationId: threadStartId,
-            roomId: roomId,
+            roomId: context.roomId,
             memory: memory,
             tweet: tweet,
             threadId: threadStartId,
@@ -655,9 +899,9 @@ Response (YES/NO):`;
         }
 
         await this.handleTweet({
-          tweet,
+          tweet: { ...tweet, thread: threadContext },
           message: memory,
-          thread: tweet.thread,
+          thread: threadContext.length > 0 ? threadContext : tweet.thread,
         });
 
         // Update the last checked tweet ID after processing each tweet
@@ -825,6 +1069,11 @@ Response (YES/NO):`;
       return { text: '', actions: ['IGNORE'] };
     }
 
+    if (!tweet?.id || !tweet.userId || !tweet.username) {
+      logger.warn('Skipping tweet with incomplete metadata', tweet?.id);
+      return { text: '', actions: ['IGNORE'] };
+    }
+
     // Create a callback for handling the response
     const callback: HandlerCallback = async (response: Content, tweetId?: string) => {
       try {
@@ -877,6 +1126,25 @@ Response (YES/NO):`;
     const twitterUserId = tweet.userId;
     const entityId = createUniqueUuid(this.runtime, twitterUserId);
     const twitterUsername = tweet.username;
+    const conversationId = tweet.conversationId || tweet.id;
+
+    await ensureContext(this.runtime, {
+      userId: twitterUserId,
+      username: twitterUsername,
+      name: tweet.name,
+      conversationId,
+    });
+
+    const threadedConversation = thread?.length ? thread : await this.fetchThreadContext(tweet);
+    if (threadedConversation.length > 0) {
+      await this.hydrateThreadMemories(threadedConversation);
+    }
+
+    await this.saveTrustedCorrection(tweet, entityId, message.roomId);
+    const trustedCorrectionContext = await this.getTrustedCorrectionContext(
+      entityId,
+      twitterUsername
+    );
 
     // Add Twitter-specific metadata to message
     message.metadata = {
@@ -885,14 +1153,25 @@ Response (YES/NO):`;
         entityId,
         twitterUserId,
         twitterUsername,
-        thread: thread,
+        thread: threadedConversation,
+        trustedCorrectionContext,
       },
     };
+
+    const modelInputMessage: Memory = trustedCorrectionContext
+      ? {
+          ...message,
+          content: {
+            ...message.content,
+            text: `${message.content.text}\n\n${trustedCorrectionContext}`,
+          },
+        }
+      : message;
 
     // Process message through message service
     const result = await this.runtime.messageService!.handleMessage(
       this.runtime,
-      message,
+      modelInputMessage,
       callback
     );
 

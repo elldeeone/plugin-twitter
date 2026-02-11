@@ -54,6 +54,7 @@ export async function* searchTweets(
         "text",
         "created_at",
         "author_id",
+        "conversation_id",
         "referenced_tweets",
         "entities",
         "public_metrics",
@@ -87,7 +88,7 @@ export async function* searchTweets(
         username:
           searchIterator.includes?.users?.find((u) => u.id === tweet.author_id)
             ?.username || "",
-        conversationId: tweet.id,
+        conversationId: tweet.conversation_id || tweet.id,
         hashtags: tweet.entities?.hashtags?.map((h) => h.tag) || [],
         mentions:
           tweet.entities?.mentions?.map((m) => ({

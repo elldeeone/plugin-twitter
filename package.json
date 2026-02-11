@@ -115,6 +115,34 @@
         "default": "",
         "sensitive": false
       },
+      "TWITTER_ENABLE_LEARNING": {
+        "type": "boolean",
+        "description": "Enable trusted-user correction learning into long-term facts memory.",
+        "required": false,
+        "default": true,
+        "sensitive": false
+      },
+      "TWITTER_LEARNING_TRUSTED_USERS": {
+        "type": "string",
+        "description": "Comma-separated whitelist of usernames trusted for correction learning. Use '*' to trust everyone.",
+        "required": false,
+        "default": "",
+        "sensitive": false
+      },
+      "TWITTER_LEARNING_MAX_MEMORIES": {
+        "type": "number",
+        "description": "Maximum trusted correction memories injected as reply context.",
+        "required": false,
+        "default": 5,
+        "sensitive": false
+      },
+      "TWITTER_THREAD_CONTEXT_MAX_DEPTH": {
+        "type": "number",
+        "description": "Maximum ancestor depth to hydrate when reconstructing reply-thread context.",
+        "required": false,
+        "default": 8,
+        "sensitive": false
+      },
       "TWITTER_RETRY_LIMIT": {
         "type": "number",
         "description": "Maximum number of retry attempts when a Twitter operation fails.",
