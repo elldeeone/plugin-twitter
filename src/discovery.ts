@@ -140,6 +140,12 @@ export class TwitterDiscoveryClient {
       );
     }
 
+    // Check if quote tweets are disabled
+    const disableQuoteTweets =
+      (getSetting(this.runtime, "TWITTER_DISABLE_QUOTE_TWEETS") as string ||
+        process.env.TWITTER_DISABLE_QUOTE_TWEETS ||
+        "false").toLowerCase() === "true";
+
     return {
       topics,
       minFollowerCount: parseInt(
@@ -162,7 +168,7 @@ export class TwitterDiscoveryClient {
       ),
       likeThreshold: 0.5,    // Increased from 0.3 (be more selective)
       replyThreshold: 0.7,   // Increased from 0.5 (be more selective)
-      quoteThreshold: 0.85,  // Increased from 0.7 (be more selective)
+      quoteThreshold: disableQuoteTweets ? 1.01 : 0.85,  // 1.01 = unreachable (scores capped at 1.0)
     };
   }
 
@@ -188,7 +194,7 @@ export class TwitterDiscoveryClient {
             "building",
           ].includes(word),
       );
-    return [...new Set(words)].slice(0, 5); // Limit to 5 topics
+    return [...new Set(words)].slice(0, 10); // Limit to 10 topics
   }
 
   async start() {
@@ -314,7 +320,7 @@ export class TwitterDiscoveryClient {
     const accounts = new Map<string, ScoredAccount>();
 
     // Search for each topic with different query strategies
-    for (const topic of this.config.topics.slice(0, 5)) {
+    for (const topic of this.config.topics.slice(0, 10)) {
       try {
         // Sanitize topic for search query
         const searchTopic = this.sanitizeTopic(topic);

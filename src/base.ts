@@ -314,6 +314,19 @@ export class ClientBase {
           logger.info("Successfully authenticated with Twitter API v2");
           break;
         }
+
+        // isLoggedIn() returned false without throwing — still a failure
+        lastError = new Error("isLoggedIn() returned false");
+        logger.error(
+          `Authentication attempt ${retryCount + 1} failed: credentials not verified`,
+        );
+        retryCount++;
+
+        if (retryCount < maxRetries) {
+          const delay = 2 ** retryCount * 1000;
+          logger.info(`Retrying in ${delay / 1000} seconds...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         logger.error(
@@ -383,7 +396,13 @@ export class ClientBase {
     }
 
     await this.loadLatestCheckedTweetId();
-    await this.populateTimeline();
+    try {
+      await this.populateTimeline();
+    } catch (error) {
+      logger.warn(
+        `Failed to populate timeline (non-fatal): ${error instanceof Error ? error.message : error}`,
+      );
+    }
   }
 
   async fetchOwnPosts(count: number): Promise<Tweet[]> {

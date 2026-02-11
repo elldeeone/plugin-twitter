@@ -32,6 +32,7 @@
     "vitest": "3.2.4"
   },
   "scripts": {
+    "postinstall": "bash scripts/patch-twitter-api-v2.sh",
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "tsup && elizaos test",

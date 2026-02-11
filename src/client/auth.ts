@@ -202,8 +202,14 @@ export class TwitterAuth {
       // Verify credentials by getting current user
       const me = await this.v2Client.v2.me();
       return !!me.data;
-    } catch (error) {
-      console.error("Failed to verify authentication:", error);
+    } catch (error: any) {
+      console.error("Failed to verify authentication:", error?.message || error);
+      if (error?.data) {
+        console.error("Response body:", JSON.stringify(error.data, null, 2));
+      }
+      if (error?.code) {
+        console.error("HTTP status:", error.code);
+      }
       return false;
     }
   }

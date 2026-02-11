@@ -631,6 +631,22 @@ export class TwitterInteractionClient {
         conversationId: tweet.conversationId || tweet.id,
       });
 
+      // Hydrate thread context for engagement decision
+      const threadContext = await this.fetchThreadContext(tweet);
+      await this.hydrateThreadMemories(threadContext);
+
+      // Build thread summary for the prompt
+      let threadSummary = "";
+      if (threadContext.length > 1) {
+        const threadLines = threadContext
+          .filter((t) => t.id !== tweet.id)
+          .map((t) => `@${t.username}: ${t.text?.substring(0, 120)}`)
+          .slice(-5); // last 5 messages for context
+        if (threadLines.length > 0) {
+          threadSummary = `\nThread context (earlier messages):\n${threadLines.join("\n")}\n`;
+        }
+      }
+
       // Create a simple evaluation prompt
       const evaluationContext = {
         tweet: tweet.text,
@@ -655,31 +671,37 @@ export class TwitterInteractionClient {
       };
 
       const state = await this.runtime.composeState(shouldEngageMemory);
-      const characterName = this.runtime?.character?.name || "AI Assistant";
-      const prompt = `You are ${characterName}. Should you reply to this tweet based on your interests and expertise?
-      
+      const prompt = `You are Haran, a Kaspa blockchain technical educator. Decide whether to reply to this tweet.
+${threadSummary}
 Tweet by @${tweet.username}: "${tweet.text}"
 
-Reply with YES if:
-- The topic relates to your interests or expertise
-- You can add valuable insights or perspective
-- The conversation seems constructive
+Reply YES only if the tweet is substantively about one or more of:
+- Kaspa, BlockDAG, GHOSTDAG, DAGKnight, PHANTOM consensus
+- $KAS, Kaspa mining, rusty-kaspa, the Rust rewrite
+- vProgs, L1-enshrined programmability
+- KIPs, Kaspa research, block pruning, UTXO model
+- Misinformation or FUD about any of the above that deserves correction
 
-Reply with NO if:
-- The topic is outside your knowledge
-- The tweet is inflammatory or controversial
-- You have nothing meaningful to add
+Reply NO if:
+- The tweet is casual/personal even if from a target user ("gm", "wen moon", memes)
+- The tweet is primarily about price, trading, charts, or market action
+- The tweet is about a different blockchain project with no Kaspa relevance
+- You have nothing technically substantive to add
 
-Response (YES/NO):`;
+Response (YES or NO only):`;
 
       const response = await this.runtime.useModel(ModelType.TEXT_SMALL, {
         prompt,
-        temperature: 0.3,
+        temperature: 0.2,
         maxTokens: 10,
         stop: ["\n"],
       });
 
-      return response.trim().toUpperCase().includes("YES");
+      const decision = response.trim().toUpperCase().includes("YES");
+      logger.info(
+        `[shouldEngage] @${tweet.username}: "${tweet.text.substring(0, 60)}..." → ${decision ? "YES" : "NO"}${threadContext.length > 1 ? ` (thread: ${threadContext.length} msgs)` : ""}`,
+      );
+      return decision;
     } catch (error) {
       logger.error("Error determining engagement:", error);
       return false;

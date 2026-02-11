@@ -60,6 +60,9 @@ export const twitterEnvSchema = z.object({
   TWITTER_MAX_ENGAGEMENTS_PER_RUN: z.string().default("5"), // Reduced from 10 to be less aggressive
   TWITTER_MAX_TWEET_LENGTH: z.string().default("280"), // standard tweet length
 
+  // Engagement controls
+  TWITTER_DISABLE_QUOTE_TWEETS: z.string().default("false"),
+
   // Advanced
   TWITTER_RETRY_LIMIT: z.string().default("5"),
 });
@@ -331,6 +334,13 @@ export async function validateTwitterConfig(
           5,
         ),
       ),
+      TWITTER_DISABLE_QUOTE_TWEETS: String(
+        (
+          (config as any).TWITTER_DISABLE_QUOTE_TWEETS ??
+          getSetting(runtime, "TWITTER_DISABLE_QUOTE_TWEETS") ??
+          "false"
+        ).toLowerCase() === "true",
+      ),
       TWITTER_MAX_TWEET_LENGTH: String(
         safeParseInt(
           config.TWITTER_MAX_TWEET_LENGTH ??
@@ -485,6 +495,7 @@ function getDefaultConfig(): TwitterConfig {
       getConfig("TWITTER_DISCOVERY_INTERVAL_MAX") || "30",
     TWITTER_MAX_ENGAGEMENTS_PER_RUN:
       getConfig("TWITTER_MAX_ENGAGEMENTS_PER_RUN") || "5",
+    TWITTER_DISABLE_QUOTE_TWEETS: getConfig("TWITTER_DISABLE_QUOTE_TWEETS") || "false",
     TWITTER_MAX_TWEET_LENGTH: getConfig("TWITTER_MAX_TWEET_LENGTH") || "280",
     TWITTER_RETRY_LIMIT: getConfig("TWITTER_RETRY_LIMIT") || "5",
   };
